@@ -1,0 +1,106 @@
+clc 
+clear all
+close all
+
+Nbits = 5000; % N bits
+
+spb = 10; %samples per symbol
+Random = upsample(sign(randn(1,Nbits)),spb); %Random sequence (in phase)
+%Random = [Random zeros(1,spb/2)]; %Adding zeros to indicate offset in phase component
+RandomQ = upsample(sign(randn(1,Nbits)),spb); %Random sequence (quadrature)
+%RandomQ = [zeros(1,spb/2) RandomQ]; %Adding zeros to indicate offset in quadrature component
+real_preamble = ones(1,1000);
+imag_preamble = ones(1,1000);
+Random = [real_preamble Random];
+RandomQ = [imag_preamble RandomQ];
+IQ = Random + j*RandomQ; %In phase, quadrature
+
+Fc = 4000; % Carrier frequency
+Fs = 10000; % Sampling frequency
+%numCycles = 137.5 ;
+%Tb = numCycles/Fc;  % Bit duration
+%t = 0:1/Fs:(numCycles-1/Fs); %Period of one cycle
+%t = t(1:2500);
+n = 0:1000+Nbits*spb-1;
+t = n/Fs;
+
+A = 1;
+
+%carrier = A*cos(2*pi*(Fc/Fs)*n); %Carrier wave
+carrier = A*exp(j*2*pi*(Fc/Fs)*n); %Carrier wave
+real_carrier = real(carrier);
+
+ps_size = 16;
+%ps = boxcar(ps_size);
+ps = blackman(ps_size);
+filtered_IQ = filter(ps,1,IQ); %Pulse shaping 
+
+I_bits = Random; %% Polar data of 1s and -1s
+Q_bits = RandomQ; 
+
+
+
+oqpsk = carrier.*filtered_IQ; %offset bpsk
+real_oqpsk = real(oqpsk);
+
+%sound(oqpsk);
+%soundsc(real(oqpsk));
+
+%Demodulation
+demod_carrier = A*exp(-j*2*pi*(Fc/Fs)*n); %same as carrier
+
+%demod_sig = real(awgn_oqpsk).*demod_carrier;
+demod_sig = real(oqpsk).*demod_carrier;
+
+demod_pass = lowpass(demod_sig,40,Fs);
+
+preamble = filtered_IQ(1:1000);
+
+z = filter(fliplr(conj(preamble)),1,demod_sig);
+[Max,index] = max(abs(z))
+correlation  = z(index)
+figure(15)
+plot(abs(z))
+
+buffered_IQ = filtered_IQ;
+
+demod_data = real(buffered_IQ(length(real_preamble)+1:spb:length(buffered_IQ))*(correlation'));
+%demod_data = downsample(demod_data,spb);
+i=1;
+data = zeros(1,length(demod_data)); %recieved data bit stream
+while i<length(demod_data)
+    if demod_data(i) < 0
+    data(i) = 0;
+    end
+    if demod_data(i) >= 0
+    data(i) = 1;
+    end
+    i = i +1;
+end
+data = circshift(data,-1);
+
+%turns polar NRZ random bits at the start to 0 and 1
+%Random = downsample([real_preamble Random],spb);
+x  = Random(length(real_preamble)+1:spb:length(Random));
+Original_data = zeros(1,length(x));
+i = 1;
+while i<length(x)
+    
+    if x(i) < 0
+    Original_data(i) = 0;
+    end
+    if x(i) >= 0
+    Original_data(i) = 1;
+    end
+    i = i +1;
+end
+
+
+%compares real data to random 
+error = biterr(Original_data,data)
+
+figure(14)
+hold on
+stem(Original_data,'-b')
+stem(data,'-r')
+hold off
